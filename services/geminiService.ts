@@ -9,6 +9,10 @@ export const geminiService = {
     stage: MOTStage,
     history: { role: string; parts: { text: string }[] }[]
   ) {
+    if (!process.env.API_KEY) {
+      throw new Error("检测到环境变量 API_KEY 缺失。请在 Vercel 设置中确保变量名为 'API_KEY' (大写) 而非 'GEMINI_API_KEY'。");
+    }
+
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
@@ -28,9 +32,14 @@ export const geminiService = {
         }
       });
       return response.text || "（客户没有说话）";
-    } catch (error) {
+    } catch (error: any) {
       console.error("Gemini API Error:", error);
-      throw new Error("AI 响应失败，请检查 API Key 配置或网络连接。");
+      // 提取更具体的错误信息
+      const errorMsg = error.message || "";
+      if (errorMsg.includes("API_KEY_INVALID")) {
+        throw new Error("API Key 无效，请检查 Vercel 中的配置是否正确。");
+      }
+      throw new Error(`AI 响应失败: ${errorMsg || "网络连接异常"}`);
     }
   },
 
@@ -41,6 +50,8 @@ export const geminiService = {
     lastCustomerMessage: string,
     lastUserMessage: string
   ) {
+    if (!process.env.API_KEY) return "环境变量配置错误 | #配置异常";
+
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
