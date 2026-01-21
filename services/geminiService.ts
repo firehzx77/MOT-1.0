@@ -1,6 +1,25 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { MOTStage, Persona, Industry, EvaluationData } from "../types";
+
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+
+/**
+ * 助手函数：将 App 的历史格式转换为 DeepSeek 的 messages 格式
+ */
+const transformHistory = (history: any[], systemInstruction: string) => {
+  const messages = [
+    { role: "system", content: systemInstruction }
+  ];
+  
+  history.forEach(item => {
+    messages.push({
+      role: item.role === 'model' || item.role === 'assistant' ? 'assistant' : 'user',
+      content: item.parts?.[0]?.text || item.content || ""
+    });
+  });
+  
+  return messages;
+};
 
 export const geminiService = {
   async getResponse(
@@ -9,37 +28,43 @@ export const geminiService = {
     stage: MOTStage,
     history: { role: string; parts: { text: string }[] }[]
   ) {
-    if (!process.env.API_KEY) {
-      throw new Error("检测到环境变量 API_KEY 缺失。请在 Vercel 设置中确保变量名为 'API_KEY' (大写) 而非 'GEMINI_API_KEY'。");
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("环境变量 API_KEY 缺失，请在 Vercel 中配置。");
     }
 
+    const systemInstruction = `你现在扮演一名正在和客服沟通的客户。
+    背景行业：${industry.name}。
+    你的画像：${persona.name}，特点是${persona.traits.join("、")}。
+    当前所处的服务阶段：${stage}。
+    任务：根据性格回复客服。保持简短（50字内），语气口语化。
+    随着客服表现好坏，你的情绪会有所波动。`;
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: history,
-        config: {
-          systemInstruction: `你现在扮演一名正在和客服沟通的客户。
-          背景行业：${industry.name}。
-          你的画像：${persona.name}，特点是${persona.traits.join("、")}。
-          当前所处的服务阶段：${stage}。
-          你的任务是：根据你的性格特点回复客服。你可以表现出不满、疑惑或满意。
-          回复要求：
-          1. 保持简短（50字以内）。
-          2. 语气口语化，符合你的画像特征。
-          3. 如果客服回复得体，你的敌意应逐渐降低；反之则升高。`,
-          temperature: 0.8,
-        }
+      const response = await fetch(DEEPSEEK_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: transformHistory(history, systemInstruction),
+          temperature: 0.7,
+          max_tokens: 150
+        })
       });
-      return response.text || "（客户没有说话）";
-    } catch (error: any) {
-      console.error("Gemini API Error:", error);
-      // 提取更具体的错误信息
-      const errorMsg = error.message || "";
-      if (errorMsg.includes("API_KEY_INVALID")) {
-        throw new Error("API Key 无效，请检查 Vercel 中的配置是否正确。");
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `API 请求失败: ${response.status}`);
       }
-      throw new Error(`AI 响应失败: ${errorMsg || "网络连接异常"}`);
+
+      const data = await response.json();
+      return data.choices[0].message.content || "（客户没有说话）";
+    } catch (error: any) {
+      console.error("DeepSeek API Error:", error);
+      throw new Error(`AI 响应失败: ${error.message}`);
     }
   },
 
@@ -50,73 +75,75 @@ export const geminiService = {
     lastCustomerMessage: string,
     lastUserMessage: string
   ) {
-    if (!process.env.API_KEY) return "环境变量配置错误 | #配置异常";
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) return "配置错误 | #API_KEY_MISSING";
+
+    const systemInstruction = `你是一名资深的MOT关键时刻服务导师。针对客服回复给出专业建议。格式必须为: "评价内容 | 标签1,标签2"`;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          { role: 'user', parts: [{ text: `客户刚才说: "${lastCustomerMessage}"\n客服回复说: "${lastUserMessage}"\n当前阶段: ${stage}` }] }
-        ],
-        config: {
-          systemInstruction: `你是一名资深的MOT关键时刻服务导师。
-          请针对客服的回复给出专业建议。
-          如果是${MOTStage.EXPLORE}阶段，强调同理心和需求确认；
-          如果是${MOTStage.OFFER}阶段，强调方案的针对性；
-          如果是${MOTStage.ACTION}阶段，强调执行力和透明度；
-          如果是${MOTStage.CONFIRM}阶段，强调闭环和客户满意度。
-          返回格式必须为: "评价内容 | 标签1,标签2"`,
-          temperature: 0.7,
-        }
+      const response = await fetch(DEEPSEEK_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: `客户刚才说: "${lastCustomerMessage}"\n客服回复说: "${lastUserMessage}"\n当前阶段: ${stage}` }
+          ],
+          temperature: 0.5
+        })
       });
-      return response.text || "建议加载失败 | #重试";
+
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || "建议加载失败 | #重试";
     } catch (error) {
-      return "无法获取导师建议，请检查配置。 | #系统异常";
+      return "无法获取导师建议 | #系统异常";
     }
   },
 
   async evaluateSession(history: any[]): Promise<EvaluationData> {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [
-        { role: 'user', parts: [{ text: `请对以下服务过程进行评估：\n${JSON.stringify(history)}` }] }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            overallScore: { type: Type.NUMBER },
-            empathy: { type: Type.NUMBER },
-            logic: { type: Type.NUMBER },
-            efficiency: { type: Type.NUMBER },
-            compliance: { type: Type.NUMBER },
-            professionalism: { type: Type.NUMBER },
-            summary: { type: Type.STRING },
-            strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
-            weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
-            keyMoments: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  type: { type: Type.STRING },
-                  time: { type: Type.STRING },
-                  stage: { type: Type.STRING },
-                  content: { type: Type.STRING },
-                  comment: { type: Type.STRING }
-                },
-                required: ["type", "time", "stage", "content", "comment"]
-              }
-            }
-          },
-          required: ["overallScore", "summary", "keyMoments"]
-        }
-      }
-    });
-    
-    return JSON.parse(response.text);
+    const apiKey = process.env.API_KEY;
+    const systemInstruction = `你是一名服务质量评估专家。请对以下对话进行多维度评估，并返回 JSON 格式结果。
+    JSON 结构示例：
+    {
+      "overallScore": 85,
+      "empathy": 4,
+      "logic": 5,
+      "efficiency": 4,
+      "compliance": 5,
+      "professionalism": 4,
+      "summary": "总结...",
+      "strengths": ["优点1"],
+      "weaknesses": ["缺点1"],
+      "keyMoments": [{"type": "positive", "time": "12:00", "stage": "探索", "content": "内容", "comment": "点评"}]
+    }`;
+
+    try {
+      const response = await fetch(DEEPSEEK_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: `请评估这段对话：${JSON.stringify(history)}` }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.3
+        })
+      });
+
+      const data = await response.json();
+      return JSON.parse(data.choices[0].message.content);
+    } catch (error) {
+      console.error("Evaluation Error:", error);
+      throw new Error("生成评估报告失败");
+    }
   }
 };
