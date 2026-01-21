@@ -1,0 +1,7 @@
+{
+  "name": "MOT - Moments of Truth AI Agent",
+  "description": "An interactive AI-powered training platform for mastering the 'Moments of Truth' service framework, featuring voice interaction and detailed performance analytics.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
