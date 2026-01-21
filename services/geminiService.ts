@@ -2,8 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { MOTStage, Persona, Industry, EvaluationData } from "../types";
 
-const API_KEY = process.env.API_KEY || "";
-
 export const geminiService = {
   async getResponse(
     industry: Industry,
@@ -11,7 +9,8 @@ export const geminiService = {
     stage: MOTStage,
     history: any[]
   ) {
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    // Initialize right before call as per guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: history,
@@ -35,7 +34,7 @@ export const geminiService = {
     lastCustomerMessage: string,
     lastUserMessage: string
   ) {
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `客户刚才说: "${lastCustomerMessage}"\n客服回复说: "${lastUserMessage}"\n当前阶段: ${stage}`,
@@ -55,7 +54,7 @@ export const geminiService = {
   },
 
   async evaluateSession(history: any[]): Promise<EvaluationData> {
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `请对以下服务过程进行评估：\n${JSON.stringify(history)}`,
